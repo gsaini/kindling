@@ -131,6 +131,17 @@ def test_tool_call_round_trip(make_client):
     ]
 
 
+def test_a_stray_newline_before_a_tool_call_is_null_content(make_client):
+    call = ToolCall("get_weather", {"city": "Paris"})
+    model = FakeModel(Turn(content="\n", tool_calls=[call]), Turn(content="Let me check.", tool_calls=[call]))
+    client = sdk(make_client(model))
+    question = [{"role": "user", "content": "Weather in Paris?"}]
+    blank = client.chat.completions.create(model="fake", messages=question, tools=[WEATHER]).choices[0].message
+    assert blank.content is None and blank.tool_calls  # what OpenAI sends, so nothing blank reaches the user
+    said = client.chat.completions.create(model="fake", messages=question, tools=[WEATHER]).choices[0].message
+    assert said.content == "Let me check." and said.tool_calls  # real text alongside a call is kept
+
+
 def test_streamed_tool_calls(make_client):
     model = FakeModel(
         Turn(tool_calls=[ToolCall("get_weather", {"city": "Oslo"}), ToolCall("get_weather", {"city": "Rome"})])

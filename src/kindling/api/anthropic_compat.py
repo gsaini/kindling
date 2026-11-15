@@ -30,7 +30,9 @@ from .compat.streaming import (
     Meter,
     ModelCall,
     ModelStreamResponse,
+    PaddedJSONResponse,
     StopScanner,
+    check_context,
     collect,
     estimate_tokens,
     tool_hint,
@@ -237,6 +239,7 @@ def _resolve(svc: Services, principal: Principal, requested: str) -> tuple[Model
 def build_call(body: MessagesRequest, spec: ModelSpec, model: ChatModel) -> ModelCall:
     messages = to_ollama_messages(body.system, body.messages)
     tools, messages = _tools(body, messages)
+    check_context(messages, tools, spec.num_ctx, anthropic=True)
     options: dict[str, Any] = {"num_predict": body.max_tokens}
     for name in ("temperature", "top_p", "top_k"):
         if getattr(body, name) is not None:
@@ -450,21 +453,25 @@ async def messages(
         _apply(blocks.feed(event), content, partial)
         return not blocks.finished
 
-    try:
-        await collect(request, call, feed)
-        _apply(blocks.end(), content, partial)
-        meter.finish(blocks.usage)
-    except ClientGone:
-        return Response(status_code=499)  # nobody is listening; usage is recorded as "stopped"
-    except Exception as error:
-        meter.finish(None, error=True)
-        raise errors.model_error(error) from error
-    finally:
-        await meter.record()
+    async def produce() -> Response:
+        try:
+            await collect(request, call, feed)
+            _apply(blocks.end(), content, partial)
+            meter.finish(blocks.usage)
+        except ClientGone:
+            return Response(status_code=499)  # nobody is listening; usage is recorded as "stopped"
+        except Exception as error:
+            meter.finish(None, error=True)
+            return errors.response_for("anthropic", error)
+        finally:
+            await meter.record()
 
-    reply = _message(message_id, echoed, content, blocks.usage_body())
-    reply["stop_reason"], reply["stop_sequence"] = blocks.stop_reason()
-    return JSONResponse(reply, headers=headers)
+        reply = _message(message_id, echoed, content, blocks.usage_body())
+        reply["stop_reason"], reply["stop_sequence"] = blocks.stop_reason()
+        return JSONResponse(reply, headers=headers)
+
+    # The call runs while the response is being sent, so a slow one can pad the connection open.
+    return PaddedJSONResponse(produce, headers=headers)
 
 
 @router.post("/messages/count_tokens")

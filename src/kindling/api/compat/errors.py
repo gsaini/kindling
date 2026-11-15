@@ -27,11 +27,13 @@ Flavor = Literal["openai", "anthropic"]
 
 
 class InvalidRequest(HTTPException):
-    """A 400 that names the offending field (OpenAI's `param`)."""
+    """A 400 that names the offending field (OpenAI's `param`) and, where OpenAI has one, its error
+    `code` (such as context_length_exceeded), so SDK users can tell the cases apart."""
 
-    def __init__(self, message: str, param: str | None = None):
+    def __init__(self, message: str, param: str | None = None, code: str | None = None):
         super().__init__(400, message)
         self.param = param
+        self.code = code
 
 
 def flavor(request: Request) -> Flavor | None:
@@ -78,16 +80,16 @@ _ANTHROPIC_TYPES = {
 }
 
 
-def openai_error(status: int, message: str, param: str | None = None) -> dict[str, Any]:
+def openai_error(status: int, message: str, param: str | None = None, code: str | None = None) -> dict[str, Any]:
     if status == 429:
-        kind, code = "rate_limit_error", "rate_limit_exceeded"
+        kind, default = "rate_limit_error", "rate_limit_exceeded"
     elif status == 503:
-        kind, code = "server_error", "overloaded"
+        kind, default = "server_error", "overloaded"
     elif status >= 500:
-        kind, code = "server_error", None
+        kind, default = "server_error", None
     else:
-        kind, code = "invalid_request_error", _OPENAI_CODES.get(status)
-    return {"error": {"message": message, "type": kind, "param": param, "code": code}}
+        kind, default = "invalid_request_error", _OPENAI_CODES.get(status)
+    return {"error": {"message": message, "type": kind, "param": param, "code": code or default}}
 
 
 def anthropic_error(status: int, message: str) -> tuple[int, dict[str, Any]]:
@@ -99,12 +101,18 @@ def anthropic_error(status: int, message: str) -> tuple[int, dict[str, Any]]:
 
 
 def error_response(
-    kind: Flavor, status: int, message: str, *, param: str | None = None, headers: dict[str, str] | None = None
+    kind: Flavor,
+    status: int,
+    message: str,
+    *,
+    param: str | None = None,
+    code: str | None = None,
+    headers: dict[str, str] | None = None,
 ) -> JSONResponse:
     if kind == "anthropic":
         status, body = anthropic_error(status, message)
     else:
-        body = openai_error(status, message, param)
+        body = openai_error(status, message, param, code)
     return JSONResponse(body, status_code=status, headers=headers)
 
 
@@ -112,7 +120,12 @@ def response_for(kind: Flavor, error: Exception) -> JSONResponse:
     """The error response for a failed model call (or any HTTPException)."""
     http = model_error(error)
     return error_response(
-        kind, http.status_code, _detail(http.detail), param=getattr(http, "param", None), headers=http.headers
+        kind,
+        http.status_code,
+        _detail(http.detail),
+        param=getattr(http, "param", None),
+        code=getattr(http, "code", None),
+        headers=http.headers,
     )
 
 
@@ -154,6 +167,7 @@ def _wrap(previous: Handler) -> Handler:
             error.status_code,
             _detail(error.detail),
             param=getattr(error, "param", None),
+            code=getattr(error, "code", None),
             headers=getattr(error, "headers", None),
         )
 

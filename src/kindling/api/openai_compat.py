@@ -20,7 +20,17 @@ from pydantic import BaseModel, ConfigDict, Field
 from ..llm import ChatModel, Message, ModelEvent, ModelSpec, ToolCall, Usage
 from .compat import errors
 from .compat.errors import InvalidRequest
-from .compat.streaming import ClientGone, Meter, ModelCall, ModelStreamResponse, collect, tool_hint, with_system_hint
+from .compat.streaming import (
+    ClientGone,
+    Meter,
+    ModelCall,
+    ModelStreamResponse,
+    PaddedJSONResponse,
+    check_context,
+    collect,
+    tool_hint,
+    with_system_hint,
+)
 from .deps import Principal, Services, require_scope, services
 
 router = APIRouter(prefix="/v1", tags=["openai"])
@@ -258,6 +268,7 @@ def build_call(body: ChatCompletionRequest, spec: ModelSpec, model: ChatModel) -
         raise InvalidRequest("only n=1 is supported", "n")
     messages = to_ollama_messages(body.messages)
     tools, messages = _tools(body, messages)
+    check_context(messages, tools, spec.num_ctx)
     return ModelCall(
         model=model,
         messages=messages,
@@ -403,42 +414,49 @@ async def chat_completions(
             call, encoder, meter, on_error=lambda e: errors.response_for("openai", e), headers=headers
         )
 
-    reply = _Reply()
-    try:
-        await collect(request, call, reply.feed)
-        meter.finish(reply.usage)
-    except ClientGone:
-        return Response(status_code=499)  # nobody is listening; usage is recorded as "stopped"
-    except Exception as error:
-        meter.finish(None, error=True)
-        raise errors.model_error(error) from error
-    finally:
-        await meter.record()
+    async def produce() -> Response:
+        reply = _Reply()
+        try:
+            await collect(request, call, reply.feed)
+            meter.finish(reply.usage)
+        except ClientGone:
+            return Response(status_code=499)  # nobody is listening; usage is recorded as "stopped"
+        except Exception as error:
+            meter.finish(None, error=True)
+            return errors.response_for("openai", error)
+        finally:
+            await meter.record()
 
-    message: dict[str, Any] = {"role": "assistant", "content": reply.content or (None if reply.calls else "")}
-    if reply.reasoning:
-        message["reasoning_content"] = reply.reasoning
-    if reply.calls:
-        message["tool_calls"] = [{k: v for k, v in c.items() if k != "index"} for c in _wire_calls(reply.calls)]
-    return JSONResponse(
-        {
-            "id": completion_id,
-            "object": "chat.completion",
-            "created": int(time.time()),
-            "model": spec.id,
-            "system_fingerprint": None,
-            "choices": [
-                {
-                    "index": 0,
-                    "message": message,
-                    "logprobs": None,
-                    "finish_reason": _finish_reason(bool(reply.calls), reply.usage, limit),
-                }
-            ],
-            "usage": _usage(reply.usage),
-        },
-        headers=headers,
-    )
+        # Models often write a stray newline before a tool call. OpenAI sends null content with tool calls,
+        # and a client that forwards any non-empty content (to WhatsApp, say) would send a blank message.
+        content = reply.content if reply.content.strip() or not reply.calls else ""
+        message: dict[str, Any] = {"role": "assistant", "content": content or (None if reply.calls else "")}
+        if reply.reasoning:
+            message["reasoning_content"] = reply.reasoning
+        if reply.calls:
+            message["tool_calls"] = [{k: v for k, v in c.items() if k != "index"} for c in _wire_calls(reply.calls)]
+        return JSONResponse(
+            {
+                "id": completion_id,
+                "object": "chat.completion",
+                "created": int(time.time()),
+                "model": spec.id,
+                "system_fingerprint": None,
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": message,
+                        "logprobs": None,
+                        "finish_reason": _finish_reason(bool(reply.calls), reply.usage, limit),
+                    }
+                ],
+                "usage": _usage(reply.usage),
+            },
+            headers=headers,
+        )
+
+    # The call runs while the response is being sent, so a slow one can pad the connection open.
+    return PaddedJSONResponse(produce, headers=headers)
 
 
 def install(app: FastAPI) -> None:

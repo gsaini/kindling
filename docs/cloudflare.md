@@ -391,9 +391,12 @@ part of Cloudflare Zero Trust (its free tier covers small teams; check current Z
   that long the visitor gets **HTTP 524**. Only Enterprise can raise it. Cloudflare's 524 page doesn't say
   whether the clock restarts on every chunk, but the practical rule is: the first byte must arrive within
   125 s, and a stream must keep producing bytes.
-- **Always stream** for anything that might take more than a minute (`"stream": true`, Claude Code always
-  does). A non-streaming request that generates for over two minutes will be cut off with a 524 even though
-  Kindling finishes the work.
+- **Non-streaming replies are padded.** If a non-streaming `/v1/chat/completions` or `/v1/messages` reply
+  isn't ready after 20 s, Kindling sends status 200 and the headers, then a space every 15 s, then the JSON
+  (leading whitespace is valid JSON, so SDKs parse it as usual). A slow reply therefore isn't cut off with a
+  524. The cost: an error after that point arrives as the API's error body with status 200, so a client
+  that only checks the status code should also check for an `error` field. Streaming (`"stream": true`)
+  remains the better choice for long replies: the text arrives as it is written.
 - **Reasoning phases.** Nemotron can think for a long time before its answer. If the thinking tokens are
   streamed, bytes keep flowing. If an endpoint holds them back (or the model is loading, or a request waits
   in Kindling's generation queue for up to `KINDLING_QUEUE_TIMEOUT_SECONDS`), the connection can sit silent
@@ -458,7 +461,7 @@ curl -sN https://gateway.ai.cloudflare.com/v1/$ACCT/$GW/custom-kindling/v1/messa
 | 403 `{"detail":"forbidden"}` | origin secret missing or wrong (Transform Rule vs `.env`), or you called `127.0.0.1` without it |
 | 401 from Kindling | missing or bad Kindling key (through the gateway: the key must be in `Authorization: Bearer`) |
 | 401 from the gateway | missing or bad `cf-aig-authorization` token |
-| 524 | nothing sent for 125 s: stream, warm the model, or shorten the queue |
+| 524 | nothing sent for 125 s: on /v1 Kindling pads and pings, so look at the hop in between (a gateway, a proxy that buffers), warm the model, or shorten the queue |
 | Access login page in an SDK | Access is on the hostname: add the service token headers |
 | `tunnel credentials file ... doesn't exist` | the tunnel was created elsewhere; restore the JSON or delete the tunnel and re-run `setup.sh` |
 

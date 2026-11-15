@@ -83,8 +83,12 @@ set). **An unknown model name that starts with `claude-` is served by the defaul
 reply echoes the name that was asked for, so Claude Code is satisfied; any other unknown name is a
 404. Set the variables above to choose the models explicitly.
 
-Claude Code's system prompt and tool definitions are large (well over 16k tokens), and Ollama
-truncates silently, so give the model it uses a bigger window in models.toml:
+Claude Code's system prompt and tool definitions are large (well over 16k tokens). A prompt that is
+certainly longer than the model's `num_ctx` is refused with `prompt is too long: N tokens > M maximum`
+(OpenAI API: 400 `context_length_exceeded`); the check counts six characters per token, so it only
+refuses what can't fit. Below that, what happens depends on the runner: Ollama's llama engine drops the
+oldest text silently, its MLX engine reads it all, slowly. Either way, give the model a bigger window in
+models.toml:
 
 ```toml
 [models.nemotron-code]

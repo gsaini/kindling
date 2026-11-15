@@ -11,13 +11,16 @@ Both APIs follow the same rules:
 - While the model is silent (loading, queued, reading a long prompt), a keepalive goes out every
   KEEPALIVE_SECONDS, so Cloudflare (which gives up after about 125 s without a byte) keeps the
   connection open. See keepalive.py.
+- A non-streaming reply that isn't ready after PAD_AFTER_SECONDS commits to 200 and sends a space
+  every KEEPALIVE_SECONDS until its JSON is ready (PaddedJSONResponse), for the same reason.
+- A prompt that clearly can't fit the model's context window is refused up front (check_context).
 """
 
 from __future__ import annotations
 
 import json
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -29,10 +32,19 @@ from starlette.types import Receive, Scope, Send
 from ...llm import ChatModel, Message, ModelEvent, Usage
 from ...usage import UsageEvent
 from ..deps import Principal, Services
+from .errors import InvalidRequest
 from .keepalive import with_keepalive
 
 PRIME_SECONDS = 1.0  # how long a stream waits for the first model event before committing to 200
 KEEPALIVE_SECONDS = 15.0  # Cloudflare cuts a request after about 125 s without a byte from the origin
+# How long a non-streaming reply may take before it commits to 200 and starts padding. Short enough
+# to stay far from Cloudflare's limit, long enough that ordinary replies (and fast failures, such as
+# a full queue) keep their real status code.
+PAD_AFTER_SECONDS = 20.0
+# Characters per token for the context check. Real text runs at about 3 to 5.5 characters per token,
+# so dividing by 6 undercounts: the check only refuses prompts that are certainly too long, and leaves
+# borderline ones to the model.
+CHARS_PER_TOKEN_AT_MOST = 6
 
 
 @dataclass
@@ -243,6 +255,94 @@ class ModelStreamResponse(Response):
                 break
         await send({"type": "http.response.body", "body": b"", "more_body": False})
         return failed
+
+
+class PaddedJSONResponse(Response):
+    """A non-streaming JSON reply that keeps the connection open while it is being made.
+
+    `produce()` runs the model call and returns the finished response (the reply, or the API's error).
+    If it finishes within PAD_AFTER_SECONDS, that response goes out unchanged: its own status, headers
+    and body. Otherwise 200 and this response's headers go out at once, then a space every
+    KEEPALIVE_SECONDS, then the finished body. Leading whitespace is valid JSON, so clients parse it as
+    usual. The cost: an error that arrives after the padding started keeps the API's error body but
+    can't change the status, which is already 200 (streamed replies have the same limit).
+
+    The client watcher lives in `collect`, which `produce` calls: one reader of `receive` at a time.
+    """
+
+    media_type = "application/json"
+
+    def __init__(self, produce: Callable[[], Awaitable[Response]], *, headers: dict[str, str] | None = None):
+        self.produce = produce
+        self.status_code = 200
+        self.background = None
+        self.init_headers({"Cache-Control": "no-store", "X-Accel-Buffering": "no", **(headers or {})})
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        result: Response | None = None
+        failure: BaseException | None = None
+        done = anyio.Event()
+        started = False
+
+        async def run() -> None:
+            nonlocal result, failure
+            try:
+                result = await self.produce()
+            except Exception as error:  # produce answers errors itself; anything else is re-raised below
+                failure = error
+            finally:
+                done.set()
+
+        async with anyio.create_task_group() as group:
+            group.start_soon(run)
+            with anyio.move_on_after(PAD_AFTER_SECONDS):
+                await done.wait()
+            if not done.is_set():
+                started = True
+                await send({"type": "http.response.start", "status": 200, "headers": self.raw_headers})
+            while not done.is_set():
+                with anyio.move_on_after(KEEPALIVE_SECONDS):
+                    await done.wait()
+                if not done.is_set():
+                    try:
+                        await send({"type": "http.response.body", "body": b" ", "more_body": True})
+                    except OSError:  # the client has gone; collect's watcher stops the model
+                        pass
+
+        if failure is not None and not started:
+            raise failure
+        if not started:
+            assert result is not None
+            await result(scope, receive, send)
+            return
+        body = result.body if result is not None else b'{"error": {"message": "internal error"}}'
+        await send({"type": "http.response.body", "body": body, "more_body": False})
+
+
+def check_context(
+    messages: list[Message], tools: list[dict[str, Any]] | None, num_ctx: int, *, anthropic: bool = False
+) -> None:
+    """Refuse a prompt that is certainly longer than the context window, with OpenAI's
+    context_length_exceeded (or Anthropic's wording, which Claude Code recognises and compacts on).
+    Some runners (Ollama's MLX engine) read the whole prompt anyway, slowly and with growing memory;
+    others drop the oldest text without a word. Neither is what a client that trims its history on
+    this error wants."""
+    chars = len(json.dumps(tools, ensure_ascii=False)) if tools else 0
+    for message in messages:
+        chars += len(str(message.get("content") or ""))
+        for call in message.get("tool_calls") or []:
+            chars += len(json.dumps(call, ensure_ascii=False))
+    at_least = chars // CHARS_PER_TOKEN_AT_MOST
+    if at_least <= num_ctx:
+        return
+    if anthropic:
+        message = f"prompt is too long: {at_least} tokens > {num_ctx} maximum"
+    else:
+        message = (
+            f"This model's maximum context length is {num_ctx} tokens, but the messages and tools are at "
+            f"least {at_least} tokens. Shorten the messages or the tools."
+        )
+    raise InvalidRequest(message, "messages", code="context_length_exceeded")
 
 
 class StopScanner:

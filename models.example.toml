@@ -1,0 +1,60 @@
+# The models this Kindling server offers. Copy to models.toml (ignored by git: each machine has its own)
+# and keep the ids stable, so clients and API keys can say "nemotron" whatever runs underneath.
+#
+#   id          what clients send as `model` (plus any aliases)
+#   provider    "ollama", or "openai" for any OpenAI-compatible server (vLLM, NVIDIA NIM, llama.cpp, LM Studio)
+#   name        the model name on that provider
+#   host        Ollama host, or the OpenAI-compatible base URL (".../v1"); default: local Ollama
+#   api_key_env environment variable holding the upstream key (openai provider), if it needs one
+#   num_ctx     context window to ask for; more costs memory
+#   think       reasoning default when a request doesn't say (true / false); leave out for the model's own
+#   tools       offer Kindling's server-side tools to this model (default true)
+
+default = "nemotron"
+
+# --- this machine (Apple Silicon, 32 GB+) -------------------------------------------------------------
+
+[models.nemotron]
+provider = "ollama"
+name = "nemotron-3-nano:30b"          # 30B mixture-of-experts, about 3B active per token
+num_ctx = 16384
+aliases = ["nemotron-3-nano"]
+description = "Nemotron 3 Nano 30B: the default"
+
+[models.nemotron-fast]
+provider = "ollama"
+name = "nemotron-3-nano:4b"           # ollama pull nemotron-3-nano:4b (2.9 GB)
+num_ctx = 8192
+think = false
+description = "Nemotron 3 Nano 4B: quick answers"
+
+# For Claude Code (its prompt and tools are well over 16k tokens; Ollama truncates silently).
+# Same weights with a bigger window. Ollama reloads the model when the window changes, so if both
+# entries are busy at once they keep reloading: prefer raising `num_ctx` on `nemotron` instead.
+#
+# [models.nemotron-code]
+# provider = "ollama"
+# name = "nemotron-3-nano:30b"
+# num_ctx = 65536
+# description = "Nemotron 3 Nano with room for Claude Code"
+
+# --- a bigger machine ---------------------------------------------------------------------------------
+# Nemotron 3 Super (120B total, 12B active) through Ollama needs about 90 GB of memory for the
+# default quantisation. On that machine, point `nemotron` itself at it so clients don't change.
+#
+# [models.nemotron-super]
+# provider = "ollama"
+# name = "nemotron-3-super:120b"
+# num_ctx = 32768
+# description = "Nemotron 3 Super 120B"
+
+# --- a GPU server running vLLM or NVIDIA NIM --------------------------------------------------------
+# e.g. `vllm serve nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4` on gpu-box. Check the exact model
+# id on Hugging Face / NGC; Nemotron 3 Ultra (550B) needs a multi-GPU node.
+#
+# [models.nemotron-super-gpu]
+# provider = "openai"
+# name = "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4"
+# host = "http://gpu-box:8000/v1"
+# api_key_env = "GPU_BOX_API_KEY"
+# num_ctx = 131072

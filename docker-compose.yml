@@ -1,0 +1,51 @@
+# Local Postgres with pgvector, on port 5433 so it doesn't clash with another Postgres on 5432.
+#   docker compose up -d db && uv run kindling db upgrade
+# The API server in a container too (Ollama stays on the Mac; see docs/deploy.md):
+#   docker compose --profile app up -d --build
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped  # come back after Docker Desktop restarts or updates
+    environment:
+      POSTGRES_USER: kindling
+      POSTGRES_PASSWORD: kindling
+      POSTGRES_DB: kindling
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - kindling-db:/var/lib/postgresql/data
+      - ./deploy/postgres-init.sql:/docker-entrypoint-initdb.d/10-test-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kindling -d kindling"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  app:
+    profiles: ["app"]  # not started by a plain `docker compose up -d db`
+    build: .
+    image: kindling:local
+    env_file:
+      - path: .env  # copy .env.example; settings below override what it says about hosts
+        required: false
+    environment:
+      KINDLING_DATABASE_URL: postgresql+asyncpg://kindling:kindling@db:5432/kindling
+      KINDLING_HOST: 0.0.0.0
+      KINDLING_OLLAMA_HOST: http://host.docker.internal:11434
+      OLLAMA_HOST: http://host.docker.internal:11434  # for models.toml entries without a host
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # built in on Docker Desktop; needed on Linux
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8000:8000"  # loopback only; outside callers come in through Cloudflare (docs/cloudflare.md)
+    volumes:
+      # Create models.toml first (cp models.example.toml models.toml), or Docker makes an empty
+      # directory in its place and the server falls back to KINDLING_MODEL.
+      - ./models.toml:/app/models.toml:ro
+      - ./workspace:/app/workspace:ro  # the file tools only read
+    restart: unless-stopped
+
+volumes:
+  kindling-db:

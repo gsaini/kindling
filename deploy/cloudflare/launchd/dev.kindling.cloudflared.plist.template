@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Runs the Kindling tunnel at login, as you, and restarts it if it exits.
+  Its own label and config path, so it never touches another cloudflared service on this Mac
+  (`cloudflared service install` would use com.cloudflare.cloudflared and ~/.cloudflared).
+
+  setup.sh renders this into ${KINDLING_CF_DIR}/launchd/. Then:
+    cp ${KINDLING_CF_DIR}/launchd/dev.kindling.cloudflared.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.kindling.cloudflared.plist
+  Restart after a config change:
+    launchctl kickstart -k gui/$(id -u)/dev.kindling.cloudflared
+  Remove:
+    launchctl bootout gui/$(id -u)/dev.kindling.cloudflared
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>dev.kindling.cloudflared</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${CLOUDFLARED_BIN}</string>
+    <string>tunnel</string>
+    <string>--config</string>
+    <string>${KINDLING_CF_DIR}/config.yml</string>
+    <string>run</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <!-- Don't spin if it keeps failing (bad credentials, no network): wait between restarts. -->
+  <key>ThrottleInterval</key>
+  <integer>15</integer>
+  <key>StandardOutPath</key>
+  <string>${KINDLING_CF_DIR}/logs/cloudflared.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>${KINDLING_CF_DIR}/logs/cloudflared.err.log</string>
+</dict>
+</plist>

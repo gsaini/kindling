@@ -1,0 +1,25 @@
+# cloudflared config for the Kindling tunnel. setup.sh renders this into $KINDLING_CF_DIR/config.yml;
+# to fill it by hand, replace the ${...} placeholders.
+#
+# Kept outside ~/.cloudflared on purpose: that folder may belong to another Cloudflare account, and
+# cloudflared only reads it when no --config is given. Run with:
+#   cloudflared tunnel --config ${KINDLING_CF_DIR}/config.yml run
+# Naming the tunnel by UUID with a credentials file means cloudflared never needs a cert.pem.
+
+tunnel: ${TUNNEL_ID}
+credentials-file: ${KINDLING_CF_DIR}/${TUNNEL_ID}.json
+no-autoupdate: true  # Homebrew updates cloudflared; a self-update would fight it
+
+# Metrics and /ready for local checks: curl http://127.0.0.1:20241/ready
+metrics: 127.0.0.1:20241
+
+originRequest:
+  connectTimeout: 10s  # Kindling is on this machine; failing fast beats a hung request
+  # Keep idle origin connections around longer than a long reasoning pause.
+  keepAliveTimeout: 5m
+
+ingress:
+  - hostname: ${KINDLING_HOSTNAME}
+    service: ${KINDLING_ORIGIN}  # http://127.0.0.1:8000 unless Kindling moved
+  # Anything else that reaches this tunnel gets a 404 rather than Kindling.
+  - service: http_status:404

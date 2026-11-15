@@ -1,0 +1,29 @@
+# Keep the build context small and free of secrets and local state.
+.git
+.github
+.venv
+**/__pycache__
+**/*.py[cod]
+.pytest_cache
+.ruff_cache
+dist
+build
+*.egg-info
+
+# Secrets and per-machine config: passed in at run time (env_file, mounts), never baked in.
+.env
+.env.*
+!.env.example
+models.toml
+workspace
+evals/results
+
+tests
+docs
+deploy/*
+!deploy/entrypoint.sh
+!deploy/healthcheck.py
+docker-compose.yml
+Dockerfile
+.dockerignore
+.DS_Store

@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Optional: runs `kindling serve` at login, as you, from the repo (so .env and models.toml are found).
+  Settings come from the repo's .env; keep secrets there (chmod 600), not in this file.
+  Ollama must be running too (the Ollama app, or `brew services start ollama`).
+
+  setup.sh renders this into ${KINDLING_CF_DIR}/launchd/. Then:
+    cp ${KINDLING_CF_DIR}/launchd/dev.kindling.serve.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.kindling.serve.plist
+  Restart: launchctl kickstart -k gui/$(id -u)/dev.kindling.serve
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>dev.kindling.serve</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${UV_BIN}</string>
+    <string>run</string>
+    <string>--directory</string>
+    <string>${KINDLING_REPO}</string>
+    <string>kindling</string>
+    <string>serve</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>${KINDLING_REPO}</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!-- launchd starts with a bare PATH; uv and tools need Homebrew's. -->
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>15</integer>
+  <key>StandardOutPath</key>
+  <string>${KINDLING_CF_DIR}/logs/kindling.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>${KINDLING_CF_DIR}/logs/kindling.err.log</string>
+</dict>
+</plist>

@@ -1,0 +1,13 @@
+# Short puzzles with one checkable answer. Run twice and compare:
+#   kindling eval run reasoning --think on --label think-on
+#   kindling eval run reasoning --think off --label think-off
+#   kindling eval compare evals/results/*-think-off.jsonl evals/results/*-think-on.jsonl
+# Tools are off, so this measures the model's own reasoning. Adapted from nemotron-local-lab's puzzles.
+{"id": "bat-and-ball-cents", "tags": ["reasoning", "trick"], "tools": false, "prompt": "A bat and a ball cost $1.10 in total. The bat costs $1.00 more than the ball. How much does the ball cost, in cents? End your reply with one line of the form `ANSWER: <answer>` and nothing after it.", "expect": [{"number": 5}]}
+{"id": "letter-count", "tags": ["reasoning", "counting"], "tools": false, "prompt": "How many times does the letter r appear in the words 'strawberry raspberry'? End your reply with one line of the form `ANSWER: <answer>` and nothing after it.", "expect": [{"number": 6}]}
+{"id": "widgets", "tags": ["reasoning", "trick"], "tools": false, "prompt": "If 5 machines take 5 minutes to make 5 widgets, how many minutes do 100 machines take to make 100 widgets? End your reply with one line of the form `ANSWER: <answer>` and nothing after it.", "expect": [{"number": 5}]}
+{"id": "arithmetic", "tags": ["reasoning", "arithmetic"], "tools": false, "prompt": "What is 17 * 24 - 13? End your reply with one line of the form `ANSWER: <answer>` and nothing after it.", "expect": [{"number": 395}]}
+{"id": "ordering", "tags": ["reasoning", "logic"], "tools": false, "prompt": "Alice is older than Bob. Carol is younger than Bob. Dave is older than Alice. Who is the second youngest? End your reply with one line of the form `ANSWER: <name>` and nothing after it.", "expect": [{"regex": "ANSWER:\\W*bob\\b", "flags": "i"}]}
+{"id": "snail", "tags": ["reasoning", "trick"], "tools": false, "prompt": "A snail is at the bottom of a 10 m well. Each day it climbs 3 m and each night it slips back 2 m. On which day does it first reach the top? End your reply with one line of the form `ANSWER: <answer>` and nothing after it.", "expect": [{"number": 8}]}
+{"id": "median", "tags": ["reasoning", "arithmetic"], "tools": false, "prompt": "What is the median of 12, 3, 45, 7, 19, 3, 28? End your reply with one line of the form `ANSWER: <answer>` and nothing after it.", "expect": [{"number": 12}]}
+{"id": "sisters", "tags": ["reasoning", "logic"], "tools": false, "prompt": "I am a boy with 3 brothers. Each of my brothers has 2 sisters. How many sisters do I have? End your reply with one line of the form `ANSWER: <answer>` and nothing after it.", "expect": [{"number": 2}]}

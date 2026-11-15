@@ -1,6 +1,32 @@
-# Kindling
+# 🔥 Kindling
 
-A private AI assistant backend. Kindling serves **NVIDIA Nemotron** (or any Ollama or OpenAI-compatible model) to apps, scripts and people: streaming chat with tool calling, saved conversations in Postgres, API keys per use case, OpenAI- and Anthropic-compatible endpoints, and an eval harness. It runs on your own machine; [Hearth](../hearth) is its chat UI.
+<div align="center">
+
+![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![NVIDIA Nemotron](https://img.shields.io/badge/NVIDIA_Nemotron-76B900?style=for-the-badge&logo=nvidia&logoColor=white)
+![Ollama](https://img.shields.io/badge/Ollama-000000?style=for-the-badge&logo=ollama&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL_+_pgvector-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)
+![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-D71F00?style=for-the-badge&logo=sqlalchemy&logoColor=white)
+![Pydantic](https://img.shields.io/badge/Pydantic-E92063?style=for-the-badge&logo=pydantic&logoColor=white)
+![OpenAI API](https://img.shields.io/badge/OpenAI_compatible-412991?style=for-the-badge&logo=openai&logoColor=white)
+![Anthropic API](https://img.shields.io/badge/Anthropic_compatible-191919?style=for-the-badge&logo=anthropic&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)
+![Cloudflare](https://img.shields.io/badge/Cloudflare-F38020?style=for-the-badge&logo=cloudflare&logoColor=white)
+![Prometheus](https://img.shields.io/badge/Prometheus-E6522C?style=for-the-badge&logo=prometheus&logoColor=white)
+![uv](https://img.shields.io/badge/uv-DE5FE9?style=for-the-badge&logo=uv&logoColor=white)
+[![CI](https://img.shields.io/github/actions/workflow/status/gsaini/kindling/ci.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&label=CI)](https://github.com/gsaini/kindling/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-EAB308?style=for-the-badge)](LICENSE)
+
+**A private AI assistant backend that serves NVIDIA Nemotron from your own machine: streaming chat with tools, API keys per use case, and OpenAI / Anthropic-compatible APIs.**
+
+[Quick start](#-quick-start) • [What's inside](#-whats-inside) • [API keys](#-keys-for-different-use-cases) • [Bigger models](#-another-machine-a-bigger-nemotron) • [Development](#-development) • [Roadmap](#-roadmap)
+
+</div>
+
+---
+
+Kindling serves **NVIDIA Nemotron** (or any Ollama or OpenAI-compatible model) to apps, scripts and people: streaming chat with tool calling, saved conversations in Postgres, API keys per use case, OpenAI- and Anthropic-compatible endpoints, and an eval harness. Its companion chat UI is Hearth.
 
 ```
 Hearth · OpenAI / Anthropic SDKs · Claude Code · scripts
@@ -12,7 +38,7 @@ Kindling (FastAPI) ── keys, limits, usage ── Postgres + pgvector
 Ollama (this Mac)  ·  vLLM / NIM (a GPU box, later)
 ```
 
-## Quick start
+## 🚀 Quick start
 
 You need [uv](https://docs.astral.sh/uv/), [Ollama](https://ollama.com) with `ollama pull nemotron-3-nano:30b`, and Docker for Postgres.
 
@@ -25,9 +51,9 @@ uv run kindling keys create --owner you --name hearth --scopes chat   # shown on
 uv run kindling serve                     # http://127.0.0.1:8000, docs at /docs
 ```
 
-Every call needs a key (`Authorization: Bearer kdl_…` or `x-api-key`). For Hearth, put it in Hearth's `.env.local` as `CHAT_API_KEY`; Hearth's dev server adds it to each request, so the browser never sees it. `uv run kindling check` tells you whether the model, the database and the models file are in order.
+Every call needs a key (`Authorization: Bearer kdl_…` or `x-api-key`). For the Hearth UI, put it in Hearth's `.env.local` as `CHAT_API_KEY`; Hearth's dev server adds it to each request, so the browser never sees it. `uv run kindling check` tells you whether the model, the database and the models file are in order.
 
-## What's inside
+## 📦 What's inside
 
 | Area | What you get | Docs |
 |---|---|---|
@@ -41,7 +67,7 @@ Every call needs a key (`Authorization: Bearer kdl_…` or `x-api-key`). For Hea
 | Cloudflare | Tunnel and AI Gateway setup scripts, origin protection, client IPs | [docs/cloudflare.md](docs/cloudflare.md) |
 | Evals | `kindling eval run smoke`: datasets, scorers, runs in-process, over HTTP or against any OpenAI server; compare runs | [docs/evals.md](docs/evals.md) |
 
-## Keys for different use cases
+## 🔑 Keys for different use cases
 
 ```bash
 uv run kindling keys create --owner you --name claude-code --models nemotron --rpm 30 --daily-tokens 2000000
@@ -54,7 +80,7 @@ uv run kindling keys revoke <id|prefix>
 
 The same is available over HTTP under `/api/admin` with an admin-scoped key.
 
-## Another machine, a bigger Nemotron
+## 💻 Another machine, a bigger Nemotron
 
 Each machine keeps its own `models.toml` (it's gitignored). Keep the ids stable and change what's underneath, so clients and keys don't change: on a 128 GB machine point `nemotron` at `nemotron-3-super:120b`, or at a vLLM / NIM server with `provider = "openai"`. Then compare the two with the eval harness:
 
@@ -64,7 +90,7 @@ uv run kindling eval run smoke --label super      # on the other machine
 uv run kindling eval compare evals/results/*-nano.jsonl evals/results/*-super.jsonl
 ```
 
-## Development
+## 🔧 Development
 
 ```bash
 uv run pytest -q                          # offline: a scripted model and an in-memory store
@@ -74,10 +100,10 @@ uv run ruff check . && uv run ruff format --check .
 
 Settings are environment variables (`KINDLING_…`) or a `.env` file; [.env.example](.env.example) lists them all. Layout: `src/kindling/` (`api/` routes, `llm/` models, `agent.py` the tool loop, `tools/`, `store/` Postgres and memory stores, `auth.py` and `keys.py`, `usage.py`, `ops/`, `edge.py`, `evals/`), `migrations/` (Alembic), `deploy/`, `docs/`.
 
-## Roadmap
+## 🧭 Roadmap
 
 Long-term memory and retrieval on pgvector, more tools (web, SQL, MCP), harness and agent-trajectory evals, conversation history in Hearth.
 
-## License
+## 📄 License
 
 MIT

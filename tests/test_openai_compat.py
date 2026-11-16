@@ -12,6 +12,7 @@ import pytest
 from kindling.llm import FakeModel, ModelEvent, ToolCall, Turn, Usage
 
 from .conftest import ADMIN
+from .test_media import PNG_1PX
 
 
 def sdk(client, api_key: str = "test-admin-key") -> openai.OpenAI:
@@ -237,10 +238,11 @@ def test_errors_use_the_openai_shape(make_client):
         set(bad.json()["error"]) == {"message", "type", "param", "code"} and bad.json()["error"]["param"] == "messages"
     )
 
-    image = {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}
+    # The fake model reads text only: an image is refused, never dropped (media is tested in test_media.py).
+    image = {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{PNG_1PX}"}}
     with pytest.raises(openai.BadRequestError) as raised:
         sdk(client).chat.completions.create(model="fake", messages=[{"role": "user", "content": [image]}])
-    assert "not supported yet" in raised.value.body["message"] and raised.value.body["param"] == "messages.0.content.0"
+    assert "does not accept images" in raised.value.body["message"] and raised.value.body["param"] == "messages"
 
     orphan = [{"role": "user", "content": "x"}, {"role": "tool", "tool_call_id": "call_nope", "content": "y"}]
     with pytest.raises(openai.BadRequestError):

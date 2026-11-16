@@ -23,7 +23,8 @@ from pydantic import BaseModel, Field, field_validator
 
 from ..agent import StepLimitReached, run_agent
 from ..llm import Message, Usage
-from ..store import NewMessage, title_from
+from ..media import MediaLimits, find_ffmpeg, prepare, split_content, think_default
+from ..store import NewMedia, NewMessage, title_from
 from ..usage import UsageEvent
 from .compat.keepalive import with_keepalive
 from .compat.streaming import estimate_tokens
@@ -36,7 +37,8 @@ KEEPALIVE_SECONDS = 15.0
 
 class ChatMessage(BaseModel):
     role: Literal["system", "user", "assistant"]
-    content: str
+    # Text, or for a user message a list of content parts with images and audio (kindling.media).
+    content: str | list[dict[str, Any]]
 
 
 class ChatRequest(BaseModel):
@@ -55,6 +57,21 @@ class ChatRequest(BaseModel):
         return messages
 
 
+def _title(message: Message) -> str:
+    if message["content"].strip() or not message.get("media"):
+        return title_from(message["content"])
+    return "Image" if message["media"][0]["kind"] == "image" else "Voice note"
+
+
+def _saved_media(message: Message) -> list[NewMedia] | None:
+    """What the model received, to keep with a saved conversation."""
+    items = [
+        NewMedia(kind=m["kind"], mime=m["mime"], name=m.get("name"), seconds=m.get("seconds"), data=m["bytes"])
+        for m in message.get("media") or []
+    ]
+    return items or None
+
+
 def _line(event: dict[str, Any]) -> bytes:
     return json.dumps(event, ensure_ascii=False).encode() + b"\n"
 
@@ -67,21 +84,30 @@ async def chat(
 ) -> StreamingResponse:
     spec, model = svc.model_for(body.model, principal)
     owner = principal.owner
+    limits = MediaLimits.from_settings(svc.settings)
+    history: list[Message] = []
+    for i, message in enumerate(body.messages):
+        text, media = split_content(
+            message.content, f"messages.{i}.content", media_allowed=message.role == "user", limits=limits
+        )
+        history.append({"role": message.role, "content": text, **({"media": media} if media else {})})
+    await prepare(history, spec, limits, ffmpeg=svc.settings.ffmpeg or find_ffmpeg())
+    newest = history[-1]
+
     conversation_id = body.conversation_id
     if conversation_id is not None and await svc.store.get(owner, conversation_id) is None:
         raise HTTPException(404, "no such conversation")
     if conversation_id is None and body.save:
-        conversation_id = (await svc.store.create(owner, title_from(body.messages[-1].content))).id
+        conversation_id = (await svc.store.create(owner, _title(newest))).id
 
-    history: list[Message] = [m.model_dump() for m in body.messages]
     if svc.settings.system_prompt and history[0]["role"] != "system":
         history.insert(0, {"role": "system", "content": svc.settings.system_prompt})
     tools = svc.tools if body.tools and svc.settings.tools_enabled and spec.tools else None
-    think = body.think if body.think is not None else spec.think
+    think = think_default(body.think, spec.think, history)
 
     async def stream() -> AsyncIterator[bytes]:
         started = time.perf_counter()
-        saved: list[NewMessage] = [NewMessage(role="user", content=body.messages[-1].content)]
+        saved: list[NewMessage] = [NewMessage(role="user", content=newest["content"], media=_saved_media(newest))]
         partial = {"content": "", "thinking": ""}
         usage = UsageEvent.for_principal(principal, "/api/chat", spec.id, status="stopped")
         error: str | None = None

@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
+from ..media import to_part
 from .base import Message, ModelEvent, ModelNotReady, ToolCall, Usage
 
 if TYPE_CHECKING:
@@ -84,6 +85,12 @@ def to_openai_messages(messages: Sequence[Message]) -> list[dict[str, Any]]:
                 counter += 1
                 call_id = f"call_{counter}"
             out.append({"role": "tool", "tool_call_id": call_id, "content": message.get("content") or ""})
+        elif message.get("media"):
+            # Media first, then the text: the order the model was tested with.
+            parts = [to_part(item) for item in message["media"]]
+            if message.get("content"):
+                parts.append({"type": "text", "text": message["content"]})
+            out.append({"role": role, "content": parts})
         else:
             out.append({"role": role, "content": message.get("content") or ""})
     return out

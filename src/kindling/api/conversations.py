@@ -67,3 +67,18 @@ async def delete_conversation(
     if not await svc.store.delete(principal.owner, conversation_id):
         raise HTTPException(404, "no such conversation")
     return Response(status_code=204)
+
+
+@router.get("/{conversation_id}/media/{media_id}")
+async def get_media(
+    conversation_id: UUID,
+    media_id: UUID,
+    principal: Principal = Depends(chat_scope),
+    svc: Services = Depends(services),
+) -> Response:
+    """An image or audio clip of a saved message, as the model received it (audio as 16 kHz WAV)."""
+    media = await svc.store.get_media(principal.owner, conversation_id, media_id)
+    if media is None:
+        raise HTTPException(404, "no such media")
+    headers = {"Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff"}
+    return Response(content=media.data, media_type=media.mime, headers=headers)

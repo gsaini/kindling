@@ -17,7 +17,9 @@ from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..config import Settings
 from ..llm import ChatModel, Message, ModelEvent, ModelSpec, ToolCall, Usage
+from ..media import MediaLimits, find_ffmpeg, prepare, split_content, think_default
 from .compat import errors
 from .compat.errors import InvalidRequest
 from .compat.streaming import (
@@ -135,8 +137,10 @@ def _text(content: Any, param: str) -> str:
         kind = part.get("type") if isinstance(part, dict) else None
         if kind in ("text", "refusal"):
             texts.append(str(part.get(kind) or ""))
-        elif kind in ("image_url", "input_image", "input_audio", "file"):
-            raise InvalidRequest(f"{kind} content is not supported yet: send text", f"{param}.{i}")
+        elif kind in ("image_url", "input_image", "input_audio"):
+            raise InvalidRequest("images and audio are accepted only in user messages", f"{param}.{i}")
+        elif kind == "file":
+            raise InvalidRequest("file content is not supported: send text, images or audio", f"{param}.{i}")
         else:
             raise InvalidRequest(f"unsupported content part type {kind!r}", f"{param}.{i}")
     return "\n".join(texts)
@@ -154,9 +158,11 @@ def _arguments(raw: Any, param: str) -> dict[str, Any]:
     return value
 
 
-def to_ollama_messages(messages: list[dict[str, Any]]) -> list[Message]:
+def to_ollama_messages(messages: list[dict[str, Any]], limits: MediaLimits | None = None) -> list[Message]:
     """OpenAI chat messages -> Ollama's format. Tool results are matched to their call's name by
-    tool_call_id, from the assistant message that made the call."""
+    tool_call_id, from the assistant message that made the call. A user message's images and audio
+    go to its `media` list (kindling.media)."""
+    limits = limits or MediaLimits()
     out: list[Message] = []
     names: dict[str, str] = {}  # tool_call_id -> tool name
     for i, message in enumerate(messages):
@@ -165,7 +171,8 @@ def to_ollama_messages(messages: list[dict[str, Any]]) -> list[Message]:
         if role in ("system", "developer"):
             out.append({"role": "system", "content": _text(message.get("content"), f"{param}.content")})
         elif role == "user":
-            out.append({"role": "user", "content": _text(message.get("content"), f"{param}.content")})
+            text, media = split_content(message.get("content"), f"{param}.content", media_allowed=True, limits=limits)
+            out.append({"role": "user", "content": text, **({"media": media} if media else {})})
         elif role == "assistant":
             entry: Message = {"role": "assistant", "content": _text(message.get("content"), f"{param}.content")}
             calls = []
@@ -226,14 +233,14 @@ def _tools(body: ChatCompletionRequest, messages: list[Message]) -> tuple[list[d
     )
 
 
-def _think(body: ChatCompletionRequest, spec: ModelSpec) -> bool | None:
+def _think(body: ChatCompletionRequest, spec: ModelSpec, messages: list[Message]) -> bool | None:
     if body.think is not None:
         return body.think
     if body.reasoning_effort is not None:
         if body.reasoning_effort not in _EFFORT:
             raise InvalidRequest(f"reasoning_effort must be one of {', '.join(_EFFORT)}", "reasoning_effort")
         return _EFFORT[body.reasoning_effort]
-    return spec.think
+    return think_default(None, spec.think, messages)
 
 
 def _format(response_format: dict[str, Any] | None) -> dict[str, Any] | str | None:
@@ -263,17 +270,19 @@ def _options(body: ChatCompletionRequest) -> dict[str, Any]:
     return options
 
 
-def build_call(body: ChatCompletionRequest, spec: ModelSpec, model: ChatModel) -> ModelCall:
+async def build_call(body: ChatCompletionRequest, spec: ModelSpec, model: ChatModel, settings: Settings) -> ModelCall:
     if body.n not in (None, 1):
         raise InvalidRequest("only n=1 is supported", "n")
-    messages = to_ollama_messages(body.messages)
+    limits = MediaLimits.from_settings(settings)
+    messages = to_ollama_messages(body.messages, limits)
+    await prepare(messages, spec, limits, ffmpeg=settings.ffmpeg or find_ffmpeg())
     tools, messages = _tools(body, messages)
     check_context(messages, tools, spec.num_ctx)
     return ModelCall(
         model=model,
         messages=messages,
         tools=tools,
-        think=_think(body, spec),
+        think=_think(body, spec, messages),
         format=_format(body.response_format),
         options=_options(body),
     )
@@ -401,7 +410,7 @@ async def chat_completions(
     svc: Services = Depends(services),
 ) -> Response:
     spec, model = svc.model_for(body.model, principal)
-    call = build_call(body, spec, model)
+    call = await build_call(body, spec, model, svc.settings)
     limit = call.options.get("num_predict")
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     meter = Meter(svc, principal, ENDPOINT, spec.id, call)

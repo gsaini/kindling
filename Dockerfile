@@ -23,6 +23,8 @@ COPY src ./src
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev
 
 FROM python:3.12-slim
+# ffmpeg converts voice notes and recordings to the WAV the model reads (kindling.media).
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
 RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin kindling
 WORKDIR /app
 # Code and venv stay root-owned (read-only to the server); only these folders are writable.

@@ -38,8 +38,19 @@ class ModelSpec(BaseModel):
     num_ctx: int = 16384
     think: bool | None = None  # reasoning default when a request doesn't say; None: the model's own default
     tools: bool = True  # offer the server's tools to this model
+    # What the model reads besides text. Images and audio go only to openai-provider models (oMLX, vLLM).
+    inputs: list[Literal["text", "image", "audio"]] = Field(default_factory=lambda: ["text"])
     description: str = ""
     aliases: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def media_needs_openai(self) -> ModelSpec:
+        if "text" not in self.inputs:
+            self.inputs = ["text", *self.inputs]
+        media = [kind for kind in self.inputs if kind != "text"]
+        if media and self.provider != "openai":
+            raise ValueError(f'model {self.id!r}: {" and ".join(media)} input needs provider = "openai"')
+        return self
 
 
 class ModelsFile(BaseModel):

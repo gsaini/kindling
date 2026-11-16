@@ -49,12 +49,22 @@ class Settings(BaseSettings):
     log_format: Literal["text", "json"] = "text"
     log_level: str = "INFO"
     cors_origins: list[str] = []  # browser origins allowed to call the API directly
-    max_request_bytes: int = 2_000_000
+    # Room for images and voice notes in a request (base64 adds a third); see the media block too.
+    max_request_bytes: int = 64_000_000
     max_concurrent_generations: int = 2  # model calls running at once; the rest wait in a queue
     max_queued_generations: int = 16  # beyond this, new requests are turned away at once
     queue_timeout_seconds: float = 60.0  # how long a request may wait for a free slot
     metrics_enabled: bool = True
     api_docs: bool = False  # serve /docs and /openapi.json (they describe every route; off when exposed)
+
+    # --- media (kindling.media): images and audio in user messages --------------------------------
+    media_max_image_bytes: int = 8_000_000  # one image, decoded
+    media_max_audio_bytes: int = 15_000_000  # one audio clip, decoded, before conversion
+    media_max_audio_seconds: float = 300.0  # one audio clip
+    media_max_images: int = 16  # per request, history included
+    media_max_audio: int = 8  # per request, history included
+    # ffmpeg converts audio to the WAV the model reads; found on PATH when unset. Without it, WAV only.
+    ffmpeg: str | None = None
 
     # --- edge (kindling.edge): Cloudflare Tunnel / AI Gateway in front of the server ----------
     trust_cloudflare_headers: bool = False  # take the client IP from CF-Connecting-IP (only behind Cloudflare)

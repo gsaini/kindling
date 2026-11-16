@@ -22,8 +22,16 @@ async def info(
         "model": spec.id,
         "num_ctx": spec.num_ctx,
         "system": svc.settings.system_prompt,
+        "inputs": spec.inputs,  # what the default model reads: text, and images or audio where it can
         "models": [
-            {"id": s.id, "name": s.name, "provider": s.provider, "num_ctx": s.num_ctx, "description": s.description}
+            {
+                "id": s.id,
+                "name": s.name,
+                "provider": s.provider,
+                "num_ctx": s.num_ctx,
+                "description": s.description,
+                "inputs": s.inputs,
+            }
             for s in visible
         ],
         "tools": svc.tools.names if svc.settings.tools_enabled else [],

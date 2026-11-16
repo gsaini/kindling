@@ -11,7 +11,35 @@ from pydantic import BaseModel, Field
 Role = Literal["system", "user", "assistant", "tool"]
 
 
-class NewMessage(BaseModel):
+MediaKind = Literal["image", "audio"]
+
+
+class MediaInfo(BaseModel):
+    """An image or audio clip of a saved message, without its data (download it by id)."""
+
+    id: UUID
+    kind: MediaKind
+    mime: str
+    name: str | None = None
+    size: int
+    seconds: float | None = None  # audio only
+
+
+class NewMedia(BaseModel):
+    """An image or audio clip to save with a message: what the model received."""
+
+    kind: MediaKind
+    mime: str
+    name: str | None = None
+    seconds: float | None = None
+    data: bytes
+
+
+class StoredMedia(NewMedia):
+    id: UUID
+
+
+class _MessageFields(BaseModel):
     role: Role
     content: str = ""
     thinking: str = ""
@@ -20,10 +48,15 @@ class NewMessage(BaseModel):
     stats: dict[str, Any] | None = None  # speed and token counts, on assistant replies
 
 
-class StoredMessage(NewMessage):
+class NewMessage(_MessageFields):
+    media: list[NewMedia] | None = None  # a user message's images and audio
+
+
+class StoredMessage(_MessageFields):
     id: UUID
     seq: int
     created_at: datetime
+    media: list[MediaInfo] | None = None
 
 
 class ConversationSummary(BaseModel):

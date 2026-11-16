@@ -114,12 +114,12 @@ What each request field becomes for the model (Ollama's chat API; the openai pro
 
 | OpenAI request | Anthropic request | Model call |
 |---|---|---|
-| `messages` (system, developer, user, assistant, tool) | `system` + `messages` | `messages` in Ollama format; content arrays are joined as text |
+| `messages` (system, developer, user, assistant, tool) | `system` + `messages` | `messages` in Ollama format; text parts are joined; a user message's images and audio go to the model as content parts (see Images and audio) |
 | `tool` message `tool_call_id` | `tool_result.tool_use_id` | `tool_name` of the matching earlier call; `is_error` prefixes "Error: " |
 | `tools` (function) | `tools` with `input_schema` | `tools`; Anthropic tools without `input_schema` (server tools) are left out |
 | `tool_choice` none / auto | `tool_choice` none / auto | no tools / tools |
 | `tool_choice` required / named function | `tool_choice` any / tool | best effort: the tool list is narrowed and the system prompt says to call it |
-| `reasoning_effort` none, minimal / low, medium, high | `thinking` disabled / enabled | `think` false / true; absent (or `adaptive`): the model's `think` default |
+| `reasoning_effort` none, minimal / low, medium, high | `thinking` disabled / enabled | `think` false / true; absent (or `adaptive`): on when the newest user message has an image or audio, else the model's `think` default |
 | `think` (Kindling extra body field) | | `think`, winning over `reasoning_effort` |
 | `response_format` json_object / json_schema | `output_config.format` json_schema | `format` "json" / the schema |
 | `max_tokens`, `max_completion_tokens` | `max_tokens` (required) | `num_predict` |
@@ -168,6 +168,46 @@ Anthropic streams follow the official sequence: `message_start`, `ping`, then pe
   the chat template. Ollama has no tokenize endpoint; expect it to be within roughly 20% for English
   and code.
 
+## Images and audio
+
+Models whose models.toml entry lists them in `inputs` (`inputs = ["text", "image", "audio"]`; openai
+provider only) read images and audio in user messages, on `POST /v1/chat/completions` and `POST /api/chat`
+alike. `GET /api/info` lists each model's `inputs`, and the default model's at the top level. A request
+with media for a model that does not list it is a 400 "model 'x' does not accept images" (or audio):
+media is never dropped silently.
+
+```json
+{"role": "user", "content": [
+  {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,/9j/4AAQ..."}, "name": "rx.jpg"},
+  {"type": "input_audio", "input_audio": {"data": "T2dnUwAC...", "format": "ogg"}, "name": "voice.ogg"},
+  {"type": "text", "text": "Is the caller the patient in the prescription?"}
+]}
+```
+
+- **Images**: PNG, JPEG, WebP or GIF, as a base64 `data:` URL; the data must be the declared type.
+  Kindling never fetches a URL for a caller: `https://` images are a 400. The model server scales
+  large images down itself (oMLX: 2048 px).
+- **Audio**: base64 `data` (a `data:` URL is accepted too) with `format` wav, mp3, flac, ogg, opus,
+  webm, m4a, mp4 or aac. Kindling converts every clip with ffmpeg to 16 kHz mono WAV, the format the
+  model reads, so WhatsApp voice notes (OGG/Opus) and browser recordings (WebM, MP4) work as sent.
+  Converted clips are cached by content, since clients resend earlier voice notes every turn. Without
+  ffmpeg (`KINDLING_FFMPEG`, else PATH) only WAV is accepted.
+- **Names**: an optional `name` on a media part is kept with saved conversations; other servers ignore it.
+- **Limits** (each a 400 naming it; environment `KINDLING_MEDIA_*`): an image 8 MB, an audio clip
+  15 MB and 300 s, 16 images and 8 clips per request (history included), a request body 64 MB (two maximum-size clips are about 40 MB of base64).
+- **Reasoning**: a request that doesn't say whether to reason, and whose newest user message has an
+  image or audio, reasons. Questions that combine a photo and a voice note were answered wrongly
+  without it and rightly with it, for a few seconds more. `reasoning_effort: "none"` or `think: false`
+  turns it off.
+- **Cost**: about 550 prompt tokens for a 900x600 image and about 13 per second of audio, on Nemotron
+  3 Nano Omni.
+- **Saved conversations** (`/api/chat` with `save` or `conversation_id`) keep the new user message's
+  media as the model received it (audio as WAV). `GET /api/conversations/{id}` lists it on each message
+  as `media: [{id, kind, mime, name, size, seconds}]`; `GET /api/conversations/{id}/media/{media_id}`
+  returns the bytes to the conversation's owner.
+- **Not here**: video, remote URLs, `file` parts, and images on the Anthropic `/v1/messages`
+  endpoint (still a 400 there; use `/v1/chat/completions`).
+
 ## Upstream: a bigger Nemotron on another machine
 
 A models.toml entry with `provider = "openai"` puts any OpenAI-compatible server (vLLM, NVIDIA NIM,
@@ -196,7 +236,8 @@ num_ctx = 131072
 
 ## Known gaps versus the real APIs
 
-- Text only: image, audio, file and document inputs are a 400 "not supported yet".
+- Images and audio on `/v1/chat/completions` only (see Images and audio); `file` and `document`
+  inputs, and images on `/v1/messages`, are a 400.
 - One choice per request (`n` > 1 is a 400); no `logprobs`, `logit_bias`, `parallel_tool_calls`
   control, `prediction`, audio output, or the Responses / Assistants / Embeddings APIs.
 - `tool_choice` required / any / named tool can't be enforced on Ollama: it is a strong hint, not a

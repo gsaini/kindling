@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from typing import Protocol
 from uuid import UUID
 
-from .schemas import Conversation, ConversationSummary, NewMessage
+from .schemas import Conversation, ConversationSummary, NewMessage, StoredMedia
 
 
 class ConversationStore(Protocol):
@@ -16,4 +16,8 @@ class ConversationStore(Protocol):
     async def rename(self, owner: str, conversation_id: UUID, title: str) -> bool: ...
     async def delete(self, owner: str, conversation_id: UUID) -> bool: ...
     async def append(self, owner: str, conversation_id: UUID, messages: Sequence[NewMessage]) -> None: ...
+    async def get_media(self, owner: str, conversation_id: UUID, media_id: UUID) -> StoredMedia | None:
+        """One image or audio clip of the owner's conversation, with its data."""
+        ...
+
     async def close(self) -> None: ...

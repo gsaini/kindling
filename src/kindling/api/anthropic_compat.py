@@ -80,7 +80,10 @@ def _blocks(content: Any, param: str) -> list[dict[str, Any]]:
 
 def _unsupported(kind: Any, param: str) -> InvalidRequest:
     if kind in ("image", "document"):
-        return InvalidRequest(f"{param}: {kind} content is not supported yet: send text")
+        # Images and audio work on /v1/chat/completions; this endpoint takes text only for now.
+        return InvalidRequest(
+            f"{param}: {kind} content is not supported yet here: send text, or use /v1/chat/completions"
+        )
     return InvalidRequest(f"{param}: unsupported content block type {kind!r}")
 
 

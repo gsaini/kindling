@@ -7,10 +7,10 @@ from uuid import UUID
 
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, undefer
 
-from .models import ConversationRow, MessageRow
-from .schemas import Conversation, ConversationSummary, NewMessage, StoredMessage
+from .models import ConversationRow, MediaRow, MessageRow
+from .schemas import Conversation, ConversationSummary, MediaInfo, NewMessage, StoredMedia, StoredMessage
 
 
 class SqlStore:
@@ -52,7 +52,7 @@ class SqlStore:
         query = (
             select(ConversationRow)
             .where(ConversationRow.id == conversation_id, ConversationRow.owner == owner)
-            .options(selectinload(ConversationRow.messages))
+            .options(selectinload(ConversationRow.messages).selectinload(MessageRow.media))
         )
         async with self.sessions() as session:
             row = (await session.execute(query)).scalar_one_or_none()
@@ -91,10 +91,41 @@ class SqlStore:
                 select(func.coalesce(func.max(MessageRow.seq), -1)).where(MessageRow.conversation_id == conversation_id)
             )
             for offset, message in enumerate(messages, start=1):
-                session.add(MessageRow(conversation_id=conversation_id, seq=last + offset, **message.model_dump()))
+                row = MessageRow(
+                    conversation_id=conversation_id, seq=last + offset, **message.model_dump(exclude={"media"})
+                )
+                row.media = [
+                    MediaRow(
+                        position=i,
+                        kind=m.kind,
+                        mime=m.mime,
+                        name=m.name,
+                        size=len(m.data),
+                        seconds=m.seconds,
+                        data=m.data,
+                    )
+                    for i, m in enumerate(message.media or [])
+                ]
+                session.add(row)
             await session.execute(
                 update(ConversationRow).where(ConversationRow.id == conversation_id).values(updated_at=func.now())
             )
+
+    async def get_media(self, owner: str, conversation_id: UUID, media_id: UUID) -> StoredMedia | None:
+        query = (
+            select(MediaRow)
+            .join(MessageRow, MediaRow.message_id == MessageRow.id)
+            .join(ConversationRow, MessageRow.conversation_id == ConversationRow.id)
+            .where(MediaRow.id == media_id, ConversationRow.id == conversation_id, ConversationRow.owner == owner)
+            .options(undefer(MediaRow.data))
+        )
+        async with self.sessions() as session:
+            row = (await session.execute(query)).scalar_one_or_none()
+            if row is None:
+                return None
+            return StoredMedia(
+                id=row.id, kind=row.kind, mime=row.mime, name=row.name, seconds=row.seconds, data=row.data
+            )  # type: ignore[arg-type]
 
     async def close(self) -> None:
         await self.engine.dispose()
@@ -122,4 +153,9 @@ def _message(row: MessageRow) -> StoredMessage:
         tool_calls=row.tool_calls,
         tool_name=row.tool_name,
         stats=row.stats,
+        media=[
+            MediaInfo(id=m.id, kind=m.kind, mime=m.mime, name=m.name, size=m.size, seconds=m.seconds)  # type: ignore[arg-type]
+            for m in row.media
+        ]
+        or None,
     )

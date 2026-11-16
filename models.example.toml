@@ -9,6 +9,8 @@
 #   num_ctx     context window to ask for; more costs memory
 #   think       reasoning default when a request doesn't say (true / false); leave out for the model's own
 #   tools       offer Kindling's server-side tools to this model (default true)
+#   inputs      what it reads: ["text"] (default), or with "image" / "audio" for a model that can
+#               (openai provider only, e.g. Nemotron 3 Nano Omni on oMLX); see docs/api.md
 
 default = "nemotron"
 
